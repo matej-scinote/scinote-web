@@ -239,9 +239,11 @@ export default {
       if (!this.element.urls.update_url) return;
       if (this.inEditMode) return;
       this.inEditMode = true;
+      this.$emit('component:editing-start', this.element);
     },
     disableEditMode() {
       this.inEditMode = false;
+      this.$emit('component:editing-end', this.element);
     },
     enableNameEdit() {
       this.editingName = true;
