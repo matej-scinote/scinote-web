@@ -1,0 +1,44 @@
+# Replaces .travis.yml: build the test image once, then run `make tests-ci` (parallel rspec) against it.
+stages: [build, test]
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+  CI_IMAGE: $CI_REGISTRY_IMAGE/ci:$CI_COMMIT_SHA
+  CACHE_IMAGE: $CI_REGISTRY_IMAGE/ci:buildcache
+
+default:
+  image: docker:27
+  services: [docker:27-dind]
+  interruptible: true
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+
+build:
+  stage: build
+  timeout: 30m
+  script:
+    - docker buildx create --use --driver docker-container
+    # the registry cache keeps the apt and bundle layers between pipelines (dind starts with an empty daemon)
+    - >
+      docker buildx build -f Dockerfile.test
+      --cache-from type=registry,ref=$CACHE_IMAGE
+      --cache-to type=registry,ref=$CACHE_IMAGE,mode=max
+      -t $CI_IMAGE --push .
+
+tests:
+  stage: test
+  needs: [build]
+  timeout: 1h
+  script:
+    - apk add --no-cache make bash openssl
+    - docker pull "$CI_IMAGE"
+    # docker-compose.test.yml names the image scinote_web_test; compose only builds it when it is missing
+    - docker tag "$CI_IMAGE" scinote_web_test
+    - make tests-ci
